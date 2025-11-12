@@ -19,6 +19,8 @@ from tqdm import tqdm
 import argparse
 import os
 
+# check check
+
 # ----------------- USER SETTINGS -----------------
 CSV_FILE = r'C:\Users\steve\Documents\Dynamo_Research\dynamo_scripts\steadyspeed.csv'   
 OUT_NPZ = r'C:\Users\steve\Documents\Dynamo_Research\dynamo_scripts\motion_smpl.npz'
