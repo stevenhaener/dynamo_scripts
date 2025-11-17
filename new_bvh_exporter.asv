@@ -7,7 +7,7 @@
 
 %% --- USER SETTINGS ---
 matFile    = 'test.mat';                % Path to your .mat file (table 'rows')
-outputBVH  = 'output_motion.bvh';       % Output BVH filename
+outputBVH  = '/home/stevenh/Documents/output_motion.bvh';       % Output BVH filename
 frameTime  = 0.005;                     % seconds per frame
 %% ----------------------
 
@@ -39,201 +39,172 @@ T = T(:, haveCols);
 % Define which of your columns represent angles (not translations)
 angleCols = setdiff(haveCols, {'pelvis_tx','pelvis_ty','pelvis_tz'});
 
-for c = 1:numel(angleCols)
-    col = angleCols{c};
-    % only convert numeric columns
-    if isnumeric(T.(col))
-        T.(col) = T.(col) * 180/pi;
-    end
+
+% for c = 1:numel(angleCols)
+%     col = angleCols{c};
+%     % only convert numeric columns
+%     if isnumeric(T.(col))
+%         T.(col) = T.(col) * 180/pi;
+%     end
+% end
+
+%% --- Joint list (pre-order) to match example HIERARCHY ---
+jointOrder = { ...
+    'Hips', ...
+      'LeftUpLeg','LeftLeg','LeftFoot','LeftToe', ...
+      'RightUpLeg','RightLeg','RightFoot','RightToe', ...
+      'Spine','Spine1','Spine2','Neck','Head', ...
+      'LeftShoulder','LeftArm','LeftForeArm','LeftHand', ...
+      'RightShoulder','RightArm','RightForeArm','RightHand' ...
+    };
+
+%% --- Offsets taken from your example HIERARCHY (keep as given) ---
+%offsets.Hips         = [568.4 -848 -1500];
+% offsets.Hips         = [0 0 0];
+
+x_offset = getVal(T,'pelvis_tx',1)*1000;
+y_offset = getVal(T,'pelvis_ty',1)*1000;
+z_offset = getVal(T,'pelvis_tz',fi)*1000;
+
+offsets.Hips         = [586.84 97.3 -848.3];
+
+offsets.LeftUpLeg    = [0.103456 1.857840 10.548509];
+offsets.LeftLeg      = [43.500000 -0.000042 0.000010];
+offsets.LeftFoot     = [42.372192 0.000019 0.000000];
+offsets.LeftToe      = [17.299999 -0.000000 0.000003];
+
+offsets.RightUpLeg   = [0.103456 1.857823 -10.548508];
+offsets.RightLeg     = [43.500042 -0.000027 0.000004];
+offsets.RightFoot    = [42.372261 0.000000 0.000010];
+offsets.RightToe     = [17.299994 -0.000006 0.000017];
+
+offsets.Spine        = [6.901967 -2.603732 -0.000003];
+offsets.Spine1       = [12.588099 0.000010 0.000008];
+offsets.Spine2       = [12.343201 -0.000018 -0.000005];
+offsets.Neck         = [25.832890 0.000023 0.000007];
+offsets.Head         = [11.766609 -0.000008 -0.000006];
+
+offsets.LeftShoulder = [19.745909 -1.480347 6.000101];
+offsets.LeftArm      = [11.284133 0.000018 -0.000020];
+offsets.LeftForeArm  = [33.000050 -0.000013 0.000019];
+offsets.LeftHand     = [25.200005 0.000032 0.000011];
+
+offsets.RightShoulder= [19.746101 -1.480358 -6.000078];
+offsets.RightArm     = [11.284140 -0.000000 -0.000001];
+offsets.RightForeArm = [33.000103 0.000016 -0.000001];
+offsets.RightHand    = [25.199762 0.000123 0.000432];
+
+%% --- Open BVH for plain-text writing ---
+fid = fopen(outputBVH,'wt');
+if fid == -1
+    error('Could not open %s for writing.', outputBVH);
 end
 
-%% --- LaFAN1 joint list and 69-channel ordered list ---
-% LaFAN1 22-joint skeleton (Hips plus 21 joints)
-lafan1_joints = { ...
-    'Hips', ...        % root
-    'Spine','Spine1','Spine2','Neck','Head', ...
-    'LeftShoulder','LeftArm','LeftForeArm','LeftHand', ...
-    'RightShoulder','RightArm','RightForeArm','RightHand', ...
-    'LeftUpLeg','LeftLeg','LeftFoot','LeftToeBase', ...
-    'RightUpLeg','RightLeg','RightFoot','RightToeBase' };
-
-% Build the 69-channel name list (for reference and ordering)
-channelNames = {};
-% root positions + rotations (root has 6 channels)
-channelNames = [channelNames, { 'Hips_Xposition','Hips_Yposition','Hips_Zposition',...
-                                'Hips_Xrotation','Hips_Yrotation','Hips_Zrotation'}];
-% remaining joints: each has Xrotation Yrotation Zrotation (3)
-for j = 2:numel(lafan1_joints)
-    nm = lafan1_joints{j};
-    channelNames = [channelNames, { [nm '_Xrotation'], [nm '_Yrotation'], [nm '_Zrotation'] }];
-end
-assert(numel(channelNames) == 69, 'channel list must be length 69');
-
-% (Optional) Display the ordered list once
-disp('LaFAN1 69-channel order:');
-disp(channelNames');
-
-%% --- Map your source columns into the 69-channel vector ---
-% We'll create a mapping function to fill appropriate rotation slots and
-% zero-fill missing joints. The mapping below assumes:
-% - pelvis_tx/pelvis_ty/pelvis_tz -> Hips translations (X,Y,Z)
-% - pelvis_tilt -> Hips Xrotation (pitch)
-% - pelvis_list -> Hips Yrotation (roll)
-% - pelvis_rotation -> Hips Zrotation (yaw)
-% - hip_flexion_* -> UpLeg Xrotation
-% - hip_adduction_* -> UpLeg Yrotation
-% - hip_rotation_* -> UpLeg Zrotation
-% - knee_angle_* -> Leg Xrotation (flexion)
-% - ankle_angle_* -> Foot Xrotation
-% - subtalar_angle_* -> Foot Yrotation
-% - mtp_angle_* -> ToeBase Xrotation
-% - lumbar_* -> mapped into Spine (Spine X,Y,Z rotations)
-%
-% If your data uses different axes, adjust mapping below.
-
-%% --- Offsets for BVH hierarchy (approximate mm units) ---
-offsets.Hips         = [0 0 0];
-offsets.Spine        = [0 8 0];
-offsets.Spine1       = [0 8 0];
-offsets.Spine2       = [0 6 0];
-offsets.Neck         = [0 4 0];
-offsets.Head         = [0 4 0];
-
-offsets.LeftShoulder = [3 4 0];
-offsets.LeftArm      = [12 0 0];
-offsets.LeftForeArm  = [12 0 0];
-offsets.LeftHand     = [8 0 0];
-
-offsets.RightShoulder= [-3 4 0];
-offsets.RightArm     = [-12 0 0];
-offsets.RightForeArm = [-12 0 0];
-offsets.RightHand    = [-8 0 0];
-
-offsets.LeftUpLeg    = [2  -10  0];
-offsets.LeftLeg      = [0 -30 0];
-offsets.LeftFoot     = [0 -30 0];
-offsets.LeftToeBase  = [0 -4 2];
-
-offsets.RightUpLeg   = [-2 -10 0];
-offsets.RightLeg     = [0 -30 0];
-offsets.RightFoot    = [0 -30 0];
-offsets.RightToeBase = [0 -4 2];
-
-%% --- Open BVH file and write hierarchy ---
-fid = fopen(outputBVH,'w');
-if fid < 0, error('Cannot open %s for writing.', outputBVH); end
-
+%% --- Write HIERARCHY (structure & channel ordering as in example) ---
 fprintf(fid,'HIERARCHY\n');
-
-% ROOT Hips
 fprintf(fid,'ROOT Hips\n{\n');
-fprintf(fid,'\tOFFSET %.4f %.4f %.4f\n', offsets.Hips);
-fprintf(fid,'\tCHANNELS 6 Xposition Yposition Zposition Xrotation Yrotation Zrotation\n');
-
-% Spine chain
-fprintf(fid,'\tJOINT Spine\n\t{\n');
-fprintf(fid,'\t\tOFFSET %.4f %.4f %.4f\n', offsets.Spine);
-fprintf(fid,'\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-
-fprintf(fid,'\t\tJOINT Spine1\n\t\t{\n');
-fprintf(fid,'\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.Spine1);
-fprintf(fid,'\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-
-fprintf(fid,'\t\t\tJOINT Spine2\n\t\t\t{\n');
-fprintf(fid,'\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.Spine2);
-fprintf(fid,'\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-
-fprintf(fid,'\t\t\t\tJOINT Neck\n\t\t\t\t{\n');
-fprintf(fid,'\t\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.Neck);
-fprintf(fid,'\t\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-
-fprintf(fid,'\t\t\t\t\tJOINT Head\n\t\t\t\t\t{\n');
-fprintf(fid,'\t\t\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.Head);
-fprintf(fid,'\t\t\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\t\t\t\tEnd Site\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tOFFSET 0 0 0\n\t\t\t\t\t\t}\n');
-fprintf(fid,'\t\t\t\t\t}\n'); % End Head
-fprintf(fid,'\t\t\t\t}\n'); % End Neck
-fprintf(fid,'\t\t\t}\n'); % End Spine2
-fprintf(fid,'\t\t}\n'); % End Spine1
-fprintf(fid,'\t}\n'); % End Spine
-
-% Left arm chain
-fprintf(fid,'\tJOINT LeftShoulder\n\t{\n');
-fprintf(fid,'\t\tOFFSET %.4f %.4f %.4f\n', offsets.LeftShoulder);
-fprintf(fid,'\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\tJOINT LeftArm\n\t\t{\n');
-fprintf(fid,'\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.LeftArm);
-fprintf(fid,'\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\tJOINT LeftForeArm\n\t\t\t{\n');
-fprintf(fid,'\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.LeftForeArm);
-fprintf(fid,'\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\t\tJOINT LeftHand\n\t\t\t\t{\n');
-fprintf(fid,'\t\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.LeftHand);
-fprintf(fid,'\t\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\t\t\tEnd Site\n\t\t\t\t\t{\n\t\t\t\t\t\tOFFSET 0 0 0\n\t\t\t\t\t}\n');
-fprintf(fid,'\t\t\t\t}\n'); % End LeftHand
-fprintf(fid,'\t\t\t}\n'); % End LeftForeArm
-fprintf(fid,'\t\t}\n'); % End LeftArm
-fprintf(fid,'\t}\n'); % End LeftShoulder
-
-% Right arm chain
-fprintf(fid,'\tJOINT RightShoulder\n\t{\n');
-fprintf(fid,'\t\tOFFSET %.4f %.4f %.4f\n', offsets.RightShoulder);
-fprintf(fid,'\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\tJOINT RightArm\n\t\t{\n');
-fprintf(fid,'\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.RightArm);
-fprintf(fid,'\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\tJOINT RightForeArm\n\t\t\t{\n');
-fprintf(fid,'\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.RightForeArm);
-fprintf(fid,'\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\t\tJOINT RightHand\n\t\t\t\t{\n');
-fprintf(fid,'\t\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.RightHand);
-fprintf(fid,'\t\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\t\t\tEnd Site\n\t\t\t\t\t{\n\t\t\t\t\t\tOFFSET 0 0 0\n\t\t\t\t\t}\n');
-fprintf(fid,'\t\t\t\t}\n'); % End RightHand
-fprintf(fid,'\t\t\t}\n'); % End RightForeArm
-fprintf(fid,'\t\t}\n'); % End RightArm
-fprintf(fid,'\t}\n'); % End RightShoulder
+fprintf(fid,'\tOFFSET %.6f %.6f %.6f\n', offsets.Hips);
+fprintf(fid,'\tCHANNELS 6 Xposition Yposition Zposition Zrotation Yrotation Xrotation\n');
 
 % Left leg chain
 fprintf(fid,'\tJOINT LeftUpLeg\n\t{\n');
-fprintf(fid,'\t\tOFFSET %.4f %.4f %.4f\n', offsets.LeftUpLeg);
-fprintf(fid,'\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
+fprintf(fid,'\t\tOFFSET %.6f %.6f %.6f\n', offsets.LeftUpLeg);
+fprintf(fid,'\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
 fprintf(fid,'\t\tJOINT LeftLeg\n\t\t{\n');
-fprintf(fid,'\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.LeftLeg);
-fprintf(fid,'\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
+fprintf(fid,'\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.LeftLeg);
+fprintf(fid,'\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
 fprintf(fid,'\t\t\tJOINT LeftFoot\n\t\t\t{\n');
-fprintf(fid,'\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.LeftFoot);
-fprintf(fid,'\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\t\tJOINT LeftToeBase\n\t\t\t\t{\n');
-fprintf(fid,'\t\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.LeftToeBase);
-fprintf(fid,'\t\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\t\t\tEnd Site\n\t\t\t\t\t{\n\t\t\t\t\t\tOFFSET 0 0 0\n\t\t\t\t\t}\n');
-fprintf(fid,'\t\t\t\t}\n'); % End LeftToeBase
-fprintf(fid,'\t\t\t}\n'); % End LeftFoot
-fprintf(fid,'\t\t}\n'); % End LeftLeg
-fprintf(fid,'\t}\n'); % End LeftUpLeg
+fprintf(fid,'\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.LeftFoot);
+fprintf(fid,'\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\tJOINT LeftToe\n\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.LeftToe);
+fprintf(fid,'\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\tEnd Site\n\t\t\t\t\t{\n\t\t\t\t\t\tOFFSET 0.000000 0.000000 0.000000\n\t\t\t\t\t}\n');
+fprintf(fid,'\t\t\t\t}\n');
+fprintf(fid,'\t\t\t}\n');
+fprintf(fid,'\t\t}\n');
+fprintf(fid,'\t}\n');
 
 % Right leg chain
 fprintf(fid,'\tJOINT RightUpLeg\n\t{\n');
-fprintf(fid,'\t\tOFFSET %.4f %.4f %.4f\n', offsets.RightUpLeg);
-fprintf(fid,'\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
+fprintf(fid,'\t\tOFFSET %.6f %.6f %.6f\n', offsets.RightUpLeg);
+fprintf(fid,'\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
 fprintf(fid,'\t\tJOINT RightLeg\n\t\t{\n');
-fprintf(fid,'\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.RightLeg);
-fprintf(fid,'\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
+fprintf(fid,'\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.RightLeg);
+fprintf(fid,'\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
 fprintf(fid,'\t\t\tJOINT RightFoot\n\t\t\t{\n');
-fprintf(fid,'\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.RightFoot);
-fprintf(fid,'\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\t\tJOINT RightToeBase\n\t\t\t\t{\n');
-fprintf(fid,'\t\t\t\t\tOFFSET %.4f %.4f %.4f\n', offsets.RightToeBase);
-fprintf(fid,'\t\t\t\t\tCHANNELS 3 Xrotation Yrotation Zrotation\n');
-fprintf(fid,'\t\t\t\t\tEnd Site\n\t\t\t\t\t{\n\t\t\t\t\t\tOFFSET 0 0 0\n\t\t\t\t\t}\n');
-fprintf(fid,'\t\t\t\t}\n'); % End RightToeBase
-fprintf(fid,'\t\t\t}\n'); % End RightFoot
-fprintf(fid,'\t\t}\n'); % End RightLeg
-fprintf(fid,'\t}\n'); % End RightUpLeg
+fprintf(fid,'\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.RightFoot);
+fprintf(fid,'\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\tJOINT RightToe\n\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.RightToe);
+fprintf(fid,'\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\tEnd Site\n\t\t\t\t\t{\n\t\t\t\t\t\tOFFSET 0.000000 0.000000 0.000000\n\t\t\t\t\t}\n');
+fprintf(fid,'\t\t\t\t}\n');
+fprintf(fid,'\t\t\t}\n');
+fprintf(fid,'\t\t}\n');
+fprintf(fid,'\t}\n');
 
-fprintf(fid,'}\n'); % End ROOT Hips
+% Spine + head + arms (nested as in example)
+fprintf(fid,'\tJOINT Spine\n\t{\n');
+fprintf(fid,'\t\tOFFSET %.6f %.6f %.6f\n', offsets.Spine);
+fprintf(fid,'\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+
+fprintf(fid,'\t\tJOINT Spine1\n\t\t{\n');
+fprintf(fid,'\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.Spine1);
+fprintf(fid,'\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+
+fprintf(fid,'\t\t\tJOINT Spine2\n\t\t\t{\n');
+fprintf(fid,'\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.Spine2);
+fprintf(fid,'\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+
+fprintf(fid,'\t\t\t\tJOINT Neck\n\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.Neck);
+fprintf(fid,'\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+
+fprintf(fid,'\t\t\t\t\tJOINT Head\n\t\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.Head);
+fprintf(fid,'\t\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\t\tEnd Site\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tOFFSET 0.000000 0.000000 0.000000\n\t\t\t\t\t\t}\n');
+fprintf(fid,'\t\t\t\t\t}\n');
+fprintf(fid,'\t\t\t\t}\n');
+
+% Left shoulder/arm
+fprintf(fid,'\t\t\t\tJOINT LeftShoulder\n\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.LeftShoulder);
+fprintf(fid,'\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\tJOINT LeftArm\n\t\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.LeftArm);
+fprintf(fid,'\t\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\t\tJOINT LeftForeArm\n\t\t\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.LeftForeArm);
+fprintf(fid,'\t\t\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\t\t\tJOINT LeftHand\n\t\t\t\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.LeftHand);
+fprintf(fid,'\t\t\t\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\t\t\t\tEnd Site\n\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\tOFFSET 0.000000 0.000000 0.000000\n\t\t\t\t\t\t\t\t}\n');
+fprintf(fid,'\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n');
+
+% Right shoulder/arm
+fprintf(fid,'\t\t\t\tJOINT RightShoulder\n\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.RightShoulder);
+fprintf(fid,'\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\tJOINT RightArm\n\t\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.RightArm);
+fprintf(fid,'\t\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\t\tJOINT RightForeArm\n\t\t\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.RightForeArm);
+fprintf(fid,'\t\t\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\t\t\tJOINT RightHand\n\t\t\t\t\t\t\t{\n');
+fprintf(fid,'\t\t\t\t\t\t\t\tOFFSET %.6f %.6f %.6f\n', offsets.RightHand);
+fprintf(fid,'\t\t\t\t\t\t\t\tCHANNELS 3 Zrotation Yrotation Xrotation\n');
+fprintf(fid,'\t\t\t\t\t\t\t\tEnd Site\n\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\tOFFSET 0.000000 0.000000 0.000000\n\t\t\t\t\t\t\t\t}\n');
+fprintf(fid,'\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n');
+
+% Close spine block
+fprintf(fid,'\t\t\t}\n\t\t}\n\t}\n');
+
+% End root
+fprintf(fid,'}\n');
 
 %% --- Motion header ---
 numFrames = height(T);
@@ -241,108 +212,120 @@ fprintf(fid,'MOTION\n');
 fprintf(fid,'Frames: %d\n', numFrames);
 fprintf(fid,'Frame Time: %.6f\n', frameTime);
 
-%% --- Helper: get source value or zero ---
-getVal = @(tbl, name, i) ( ismember(name, tbl.Properties.VariableNames) * tbl{i, name} + ...
-                           (~ismember(name, tbl.Properties.VariableNames)) * 0 );
+%% --- Build channel name list in the written order ---
+channelNames = {};
+% root pos + rot (pos then Z Y X rotations)
+channelNames = [channelNames, {'Hips_Xposition','Hips_Yposition','Hips_Zposition',...
+                               'Hips_Zrotation','Hips_Yrotation','Hips_Xrotation'}];
 
-%% --- Frame construction and write ---
-% For each frame, create a 1x69 vector in channelNames order
+% For each joint after root, channel order is Z Y X
+for j = 2:numel(jointOrder)
+    nm = jointOrder{j};
+    channelNames = [channelNames, {[nm '_Zrotation'], [nm '_Yrotation'], [nm '_Xrotation']}];
+end
+
+%% --- Helper: get value or 0 if missing ---
+hasCol = @(name) ismember(name, T.Properties.VariableNames);
+getVal = @(tbl, name, idx) ( hasCol(name) * tbl{idx, name} + (~hasCol(name)) * 0 );
+%% --- Frame construction and write (matches channelNames order) ---
 for fi = 1:numFrames
-    frame = zeros(1,69);
-    % Root translations: pelvis_tx/pelvis_ty/pelvis_tz
-    frame(1) = getVal(T,'pelvis_tx',fi); % Hips Xposition
-    frame(2) = getVal(T,'pelvis_ty',fi); % Hips Yposition
-    frame(3) = getVal(T,'pelvis_tz',fi); % Hips Zposition
+    frame = zeros(1, numel(channelNames));
+    % Hips positions
+    % frame(1) = getVal(T,'pelvis_tx',fi);
+    % frame(2) = getVal(T,'pelvis_tz',fi);
+    % frame(3) = getVal(T,'pelvis_ty',fi);
+    
+    % frame(1) = getVal(T,'pelvis_tx',fi)*1000;
+    % frame(2) = getVal(T,'pelvis_ty',fi)*1000 - 880;
+    % frame(3) = getVal(T,'pelvis_tz',fi)*1000;
 
-    % Root rotations: pelvis_tilt (X), pelvis_list (Y), pelvis_rotation (Z)
-    frame(4) = getVal(T,'pelvis_tilt',fi);
-    frame(5) = getVal(T,'pelvis_list',fi);
-    frame(6) = getVal(T,'pelvis_rotation',fi);
+    frame(1) = getVal(T,'pelvis_tx',fi)*1000;
+    frame(2) = getVal(T,'pelvis_ty',fi)*1000;
+    frame(3) = getVal(T,'pelvis_tz',fi)*1000;
 
-    % Spine mapping: lumbar_* -> Spine rotations (Spine is the first spine joint)
-    spineX = getVal(T,'lumbar_extension',fi);
-    spineY = getVal(T,'lumbar_bending',fi);
-    spineZ = getVal(T,'lumbar_rotation',fi);
-    % Spine is channels 7-9 in the 69-list (after root)
-    frame(7) = spineX;
-    frame(8) = spineY;
-    frame(9) = spineZ;
+    % Hips rotations: Z Y X order (use pelvis_rotation -> Z, pelvis_list -> Y, pelvis_tilt -> X)
+    frame(4) = getVal(T,'pelvis_rotation',fi);  % Zrotation
+    frame(5) = getVal(T,'pelvis_list',fi);      % Yrotation
+    frame(6) = getVal(T,'pelvis_tilt',fi) + 90;      % Xrotation
 
-    % Spine1 & Spine2 & Neck & Head (keep zeros unless you have data)
-    % they occupy indices 10-18 (3 joints * 3 = 9 slots)
-    % LeftShoulder..RightHand (arms) will fill appropriate slots if you have data (none here)
+    % Now fill other joints in same pre-order as jointOrder (indices start at 7)
+    % compute base index for joint j: base = 6 + 3*(j-2) + 1  (1-based)
+    for j = 2:numel(jointOrder)
+        nm = jointOrder{j};
+        base = 6 + 3*(j-2) + 1;
+        % default zeros
+        z = 0; y = 0; x = 0;
 
-    % We need to compute indices for each joint's rotation triplet
-    % rotation triplets start at index 4 for Hips rotations; for subsequent joints:
-    % joint j (in lafan1_joints) rotation indices:
-    % idx = 3 + 3*(j-1) + (1:3)  [since root has 6 channels; j=2 => idx=7..9]
-    for j = 2:numel(lafan1_joints)
-        joint = lafan1_joints{j};
-        idx_start = 3 + 3*(j-1) + 1; % MATLAB 1-based -> compute carefully
-        % verify: for j=2 (Spine): idx_start = 3 + 3*(1) +1 = 7 -> correct
-        idx = idx_start:(idx_start+2);
-
-        % Fill known joints using your source columns
-        switch joint
-            case 'Spine1'
-                % keep zeros (unless you map differently)
-            case 'Spine2'
-                % keep zeros
-            case 'Neck'
-                % keep zeros
-            case 'Head'
-                % keep zeros
-            case 'LeftShoulder'
-                % keep zeros
-            case 'LeftArm'
-                % keep zeros
-            case 'LeftForeArm'
-                % keep zeros
-            case 'LeftHand'
-                % keep zeros
-            case 'RightShoulder'
-                % keep zeros
-            case 'RightArm'
-                % keep zeros
-            case 'RightForeArm'
-                % keep zeros
-            case 'RightHand'
-                % keep zeros
+        switch nm
             case 'LeftUpLeg'
-                % Left hip mapping: hip_flexion_l (X), hip_adduction_l (Y), hip_rotation_l (Z)
-                frame(idx(1)) = getVal(T,'hip_flexion_l',fi);
-                frame(idx(2)) = getVal(T,'hip_adduction_l',fi);
-                frame(idx(3)) = getVal(T,'hip_rotation_l',fi);
+                % hip_rotation_l -> Z, hip_adduction_l -> Y, hip_flexion_l -> X
+                x = getVal(T,'hip_rotation_l',fi) + 180;
+                y = getVal(T,'hip_adduction_l',fi);
+                z = getVal(T,'hip_flexion_l',fi) + 180;
+
+                % z = 180;
+                % y = 0;
+                % x = 180;
             case 'LeftLeg'
                 % knee -> Xrotation
-                frame(idx(1)) = getVal(T,'knee_angle_l',fi);
+                z = getVal(T,'knee_angle_l',fi);
+                y = 0;
+                x = 0;
             case 'LeftFoot'
-                % ankle X = ankle_angle_l, foot Y = subtalar_l
-                frame(idx(1)) = getVal(T,'ankle_angle_l',fi);
-                frame(idx(2)) = getVal(T,'subtalar_angle_l',fi);
-            case 'LeftToeBase'
-                frame(idx(1)) = getVal(T,'mtp_angle_l',fi);
+                % ankle -> X, subtalar -> Y
+                % z = 0;
+                % y = getVal(T,'subtalar_angle_l',fi);
+                % x = getVal(T,'ankle_angle_l',fi);
+            case 'LeftToe'
+                % mtp -> X
+                z = 0;
+                y = 0;
+                % x = getVal(T,'mtp_angle_l',fi);
+                x = 0;
             case 'RightUpLeg'
-                frame(idx(1)) = getVal(T,'hip_flexion_r',fi);
-                frame(idx(2)) = getVal(T,'hip_adduction_r',fi);
-                frame(idx(3)) = getVal(T,'hip_rotation_r',fi);
+                x = getVal(T,'hip_rotation_r',fi) - 180;
+                y = getVal(T,'hip_adduction_r',fi);
+                z = getVal(T,'hip_flexion_r',fi) + 180;
+                % z = -180;
+                % y = 0;
+                % x = -180;
             case 'RightLeg'
-                frame(idx(1)) = getVal(T,'knee_angle_r',fi);
+                z = getVal(T,'knee_angle_r',fi);
+                y = 0; 
+                x = 0;
             case 'RightFoot'
-                frame(idx(1)) = getVal(T,'ankle_angle_r',fi);
-                frame(idx(2)) = getVal(T,'subtalar_angle_r',fi);
-            case 'RightToeBase'
-                frame(idx(1)) = getVal(T,'mtp_angle_r',fi);
-            otherwise
-                % keep zeros for joints we don't have data for
+                z = 0; 
+                % y = getVal(T,'subtalar_angle_r',fi); 
+                % x = getVal(T,'ankle_angle_r',fi);
+            case 'RightToe'
+                z = 0; 
+                y = 0; 
+                % x = getVal(T,'mtp_angle_r',fi);
+            % case 'Spine'
+            %     % lumbar_rotation -> Z, lumbar_bending -> Y, lumbar_extension -> X
+            %     z = getVal(T,'lumbar_rotation',fi);
+            %     y = getVal(T,'lumbar_bending',fi);
+            %     x = getVal(T,'lumbar_extension',fi);
+            
+        end
+    
+        frame(base + 0) = z;
+        frame(base + 1) = y;
+        frame(base + 2) = x;
+    end
+    
+    for col = 31:69
+        rowIdx = mod(fi-1, 45) + 1;
+        varName = sprintf('Var%d', col);
+        if ismember(varName, walk1_subject1.Properties.VariableNames)
+            frame(col) = walk1_subject1{rowIdx, varName};
         end
     end
 
-    % Write the frame to file (space-separated)
+    % write frame line as space-separated floats
     fprintf(fid, repmat('%f ', 1, numel(frame)), frame);
     fprintf(fid, '\n');
 end
 
 fclose(fid);
 disp(['BVH saved to: ' outputBVH]);
-save(outputBVH)

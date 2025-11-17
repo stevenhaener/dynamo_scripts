@@ -61,7 +61,12 @@ jointOrder = { ...
 %% --- Offsets taken from your example HIERARCHY (keep as given) ---
 %offsets.Hips         = [568.4 -848 -1500];
 % offsets.Hips         = [0 0 0];
-offsets.Hips         = [586.84 97.3 -848.3];
+
+x_offset = getVal(T,'pelvis_tx',1)*1000;
+y_offset = getVal(T,'pelvis_ty',1)*1000;
+z_offset = getVal(T,'pelvis_tz',fi)*1000;
+
+offsets.Hips         = [x_offset, y_offset, z_offset];
 
 offsets.LeftUpLeg    = [0.103456 1.857840 10.548509];
 offsets.LeftLeg      = [43.500000 -0.000042 0.000010];
@@ -222,7 +227,6 @@ end
 %% --- Helper: get value or 0 if missing ---
 hasCol = @(name) ismember(name, T.Properties.VariableNames);
 getVal = @(tbl, name, idx) ( hasCol(name) * tbl{idx, name} + (~hasCol(name)) * 0 );
-
 %% --- Frame construction and write (matches channelNames order) ---
 for fi = 1:numFrames
     frame = zeros(1, numel(channelNames));
@@ -231,14 +235,18 @@ for fi = 1:numFrames
     % frame(2) = getVal(T,'pelvis_tz',fi);
     % frame(3) = getVal(T,'pelvis_ty',fi);
     
-    frame(1) = getVal(T,'pelvis_tx',fi)*1000;
-    frame(2) = getVal(T,'pelvis_ty',fi)*1000 - 880;
-    frame(3) = getVal(T,'pelvis_tz',fi)*1000;
+    % frame(1) = getVal(T,'pelvis_tx',fi)*1000;
+    % frame(2) = getVal(T,'pelvis_ty',fi)*1000 - 880;
+    % frame(3) = getVal(T,'pelvis_tz',fi)*1000;
+
+    frame(1) = getVal(T,'pelvis_tx',fi)*100;
+    frame(2) = getVal(T,'pelvis_ty',fi)*100;
+    frame(3) = getVal(T,'pelvis_tz',fi)*100;
 
     % Hips rotations: Z Y X order (use pelvis_rotation -> Z, pelvis_list -> Y, pelvis_tilt -> X)
     frame(4) = getVal(T,'pelvis_rotation',fi);  % Zrotation
     frame(5) = getVal(T,'pelvis_list',fi);      % Yrotation
-    frame(6) = getVal(T,'pelvis_tilt',fi);      % Xrotation
+    frame(6) = getVal(T,'pelvis_tilt',fi) + 90;      % Xrotation
 
     % Now fill other joints in same pre-order as jointOrder (indices start at 7)
     % compute base index for joint j: base = 6 + 3*(j-2) + 1  (1-based)
@@ -251,46 +259,83 @@ for fi = 1:numFrames
         switch nm
             case 'LeftUpLeg'
                 % hip_rotation_l -> Z, hip_adduction_l -> Y, hip_flexion_l -> X
-                z = getVal(T,'hip_rotation_l',fi);
+                x = getVal(T,'hip_rotation_l',fi) + 180;
                 y = getVal(T,'hip_adduction_l',fi);
-                x = getVal(T,'hip_flexion_l',fi);
+                z = getVal(T,'hip_flexion_l',fi) + 180;
+                
+                % x = getVal(T,'hip_adduction_l',fi) + 180;
+                % y = getVal(T,'hip_rotation_l',fi);
+                % z = getVal(T,'hip_flexion_l',fi) + 180;
+
+                % z = 180;
+                % y = 0;
+                % x = 180;
             case 'LeftLeg'
                 % knee -> Xrotation
-                z = 0;
+                z = getVal(T,'knee_angle_l',fi);
                 y = 0;
-                x = getVal(T,'knee_angle_l',fi);
+                x = 0;
             case 'LeftFoot'
                 % ankle -> X, subtalar -> Y
-                z = 0;
+                x = 0;
                 y = getVal(T,'subtalar_angle_l',fi);
-                x = getVal(T,'ankle_angle_l',fi);
+                z = getVal(T,'ankle_angle_l',fi);
             case 'LeftToe'
-                % mtp -> X
-                z = 0;
+                % mtp -> Z
+                x = 0;
                 y = 0;
-                x = getVal(T,'mtp_angle_l',fi);
+                z = getVal(T,'mtp_angle_l',fi);
             case 'RightUpLeg'
-                z = getVal(T,'hip_rotation_r',fi);
+                x = getVal(T,'hip_rotation_r',fi) - 180;
                 y = getVal(T,'hip_adduction_r',fi);
-                x = getVal(T,'hip_flexion_r',fi);
-            case 'RightLeg'
-                z = 0; y = 0; x = getVal(T,'knee_angle_r',fi);
-            case 'RightFoot'
-                z = 0; y = getVal(T,'subtalar_angle_r',fi); x = getVal(T,'ankle_angle_r',fi);
-            case 'RightToe'
-                z = 0; y = 0; x = getVal(T,'mtp_angle_r',fi);
-            case 'Spine'
-                % lumbar_rotation -> Z, lumbar_bending -> Y, lumbar_extension -> X
-                z = getVal(T,'lumbar_rotation',fi);
-                y = getVal(T,'lumbar_bending',fi);
-                x = getVal(T,'lumbar_extension',fi);
-            otherwise
-                % arms, spine1, spine2, neck, head, hands: keep zeros unless you have specific columns
-        end
+                z = getVal(T,'hip_flexion_r',fi) + 180;
+                
+                % x = getVal(T,'hip_adduction_r',fi) + 180;
+                % y = getVal(T,'hip_rotation_r',fi);
+                % z = getVal(T,'hip_flexion_r',fi) + 180;
 
+                % z = -180;
+                % y = 0;
+                % x = -180;
+            case 'RightLeg'
+                z = getVal(T,'knee_angle_r',fi);
+                y = 0; 
+                x = 0;
+            case 'RightFoot'
+                x = 0; 
+                y = getVal(T,'subtalar_angle_r',fi); 
+                z = getVal(T,'ankle_angle_r',fi);
+            case 'RightToe'
+                x = 0; 
+                y = 0; 
+                z = getVal(T,'mtp_angle_r',fi);
+            % case 'Spine'
+            %     % lumbar_rotation -> Z, lumbar_bending -> Y, lumbar_extension -> X
+            %     z = getVal(T,'lumbar_rotation',fi);
+            %     y = getVal(T,'lumbar_bending',fi);
+            %     x = getVal(T,'lumbar_extension',fi);
+            
+        end
+    
         frame(base + 0) = z;
         frame(base + 1) = y;
         frame(base + 2) = x;
+    end
+    
+    % for col = 31:69
+    %     rowIdx = mod(fi-1, 45) + 1;
+    %     varName = sprintf('Var%d', col);
+    %     if ismember(varName, walk1_subject1.Properties.VariableNames)
+    %         frame(col) = walk1_subject1{rowIdx, varName};
+    %     end
+    % end
+
+    for col = 31:69
+        rowIdx = 1;
+        varName = sprintf('Var%d', col);
+        if ismember(varName, walk1_subject1.Properties.VariableNames)
+            frame(col) = walk1_subject1{rowIdx, varName};
+        end
     end
 
     % write frame line as space-separated floats

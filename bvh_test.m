@@ -251,7 +251,7 @@ for fi = 1:numFrames
         switch nm
             case 'LeftUpLeg'
                 % hip_rotation_l -> Z, hip_adduction_l -> Y, hip_flexion_l -> X
-                z = -180;
+                z = 180;
                 y = 0;
                 x = 180;
             case 'LeftLeg'
@@ -261,12 +261,12 @@ for fi = 1:numFrames
                 x = 0;
             case 'LeftFoot'
                 % ankle -> X, subtalar -> Y
-                z = 70;
+                z = 0;
                 y = 0;
                 x = 0;
             case 'LeftToe'
                 % mtp -> X
-                z = 20;
+                z = 0;
                 y = 0;
                 x = 0;
             case 'RightUpLeg'
@@ -293,10 +293,19 @@ for fi = 1:numFrames
             otherwise
                 % arms, spine1, spine2, neck, head, hands: keep zeros unless you have specific columns
         end
-
+        
         frame(base + 0) = z;
         frame(base + 1) = y;
         frame(base + 2) = x;
+     
+    end
+    
+    for col = 31:69
+        rowIdx = mod(fi-1, 45) + 1;
+        varName = sprintf('Var%d', col);
+        if ismember(varName, walk1_subject1.Properties.VariableNames)
+            frame(col) = walk1_subject1{rowIdx, varName};
+        end
     end
 
     % write frame line as space-separated floats
