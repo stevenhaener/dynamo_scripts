@@ -234,19 +234,23 @@ for fi = 1:numFrames
     % frame(1) = getVal(T,'pelvis_tx',fi);
     % frame(2) = getVal(T,'pelvis_tz',fi);
     % frame(3) = getVal(T,'pelvis_ty',fi);
-    
-    % frame(1) = getVal(T,'pelvis_tx',fi)*1000;
-    % frame(2) = getVal(T,'pelvis_ty',fi)*1000 - 880;
-    % frame(3) = getVal(T,'pelvis_tz',fi)*1000;
 
-    frame(1) = getVal(T,'pelvis_tx',fi)*100;
-    frame(2) = getVal(T,'pelvis_ty',fi)*100;
-    frame(3) = getVal(T,'pelvis_tz',fi)*100;
+    % frame(1) = getVal(T,'pelvis_tx',fi)*100;
+    % frame(2) = getVal(T,'pelvis_ty',fi)*100;
+    % frame(3) = getVal(T,'pelvis_tz',fi)*100;
+    
+    frame(1) = 0;
+    frame(2) = sin(fi/10)*100; %getVal(T,'pelvis_ty',fi)*100;
+    frame(3) = 0;
 
     % Hips rotations: Z Y X order (use pelvis_rotation -> Z, pelvis_list -> Y, pelvis_tilt -> X)
-    frame(4) = getVal(T,'pelvis_rotation',fi);  % Zrotation
-    frame(5) = getVal(T,'pelvis_list',fi);      % Yrotation
-    frame(6) = getVal(T,'pelvis_tilt',fi) + 90;      % Xrotation
+    % frame(4) = getVal(T,'pelvis_rotation',fi);  % Zrotation
+    % frame(5) = getVal(T,'pelvis_list',fi);      % Yrotation
+    % frame(6) = getVal(T,'pelvis_tilt',fi) + 90;      % Xrotation
+
+    frame(4) = 90;  % Zrotation
+    frame(5) = 0;      % Yrotation
+    frame(6) = 90;      % Xrotation
 
     % Now fill other joints in same pre-order as jointOrder (indices start at 7)
     % compute base index for joint j: base = 6 + 3*(j-2) + 1  (1-based)
