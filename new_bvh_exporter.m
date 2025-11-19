@@ -40,14 +40,6 @@ T = T(:, haveCols);
 angleCols = setdiff(haveCols, {'pelvis_tx','pelvis_ty','pelvis_tz'});
 
 
-% for c = 1:numel(angleCols)
-%     col = angleCols{c};
-%     % only convert numeric columns
-%     if isnumeric(T.(col))
-%         T.(col) = T.(col) * 180/pi;
-%     end
-% end
-
 %% --- Joint list (pre-order) to match example HIERARCHY ---
 jointOrder = { ...
     'Hips', ...
@@ -58,13 +50,19 @@ jointOrder = { ...
       'RightShoulder','RightArm','RightForeArm','RightHand' ...
     };
 
+
+%% --- Helper: get value or 0 if missing ---
+hasCol = @(name) ismember(name, T.Properties.VariableNames);
+getVal = @(tbl, name, idx) ( hasCol(name) * tbl{idx, name} + (~hasCol(name)) * 0 );
+
+
 %% --- Offsets taken from your example HIERARCHY (keep as given) ---
 %offsets.Hips         = [568.4 -848 -1500];
 % offsets.Hips         = [0 0 0];
 
-x_offset = getVal(T,'pelvis_tx',1)*1000;
-y_offset = getVal(T,'pelvis_ty',1)*1000;
-z_offset = getVal(T,'pelvis_tz',fi)*1000;
+x_offset = getVal(T,'pelvis_tx',1)*100;
+y_offset = getVal(T,'pelvis_ty',1)*100;
+z_offset = getVal(T,'pelvis_tz',1)*100;
 
 offsets.Hips         = [x_offset, y_offset, z_offset];
 
@@ -224,33 +222,21 @@ for j = 2:numel(jointOrder)
     channelNames = [channelNames, {[nm '_Zrotation'], [nm '_Yrotation'], [nm '_Xrotation']}];
 end
 
-%% --- Helper: get value or 0 if missing ---
-hasCol = @(name) ismember(name, T.Properties.VariableNames);
-getVal = @(tbl, name, idx) ( hasCol(name) * tbl{idx, name} + (~hasCol(name)) * 0 );
+
 %% --- Frame construction and write (matches channelNames order) ---
 for fi = 1:numFrames
     frame = zeros(1, numel(channelNames));
     % Hips positions
-    % frame(1) = getVal(T,'pelvis_tx',fi);
-    % frame(2) = getVal(T,'pelvis_tz',fi);
-    % frame(3) = getVal(T,'pelvis_ty',fi);
-
-    % frame(1) = getVal(T,'pelvis_tx',fi)*100;
-    % frame(2) = getVal(T,'pelvis_ty',fi)*100;
-    % frame(3) = getVal(T,'pelvis_tz',fi)*100;
     
-    frame(1) = 0;
-    frame(2) = sin(fi/10)*100; %getVal(T,'pelvis_ty',fi)*100;
-    frame(3) = 0;
+    frame(1) = getVal(T,'pelvis_tx',fi)*100;
+    frame(2) = getVal(T,'pelvis_ty',fi)*100;
+    frame(3) = getVal(T,'pelvis_tz',fi)*100;
+    
 
     % Hips rotations: Z Y X order (use pelvis_rotation -> Z, pelvis_list -> Y, pelvis_tilt -> X)
-    % frame(4) = getVal(T,'pelvis_rotation',fi);  % Zrotation
-    % frame(5) = getVal(T,'pelvis_list',fi);      % Yrotation
-    % frame(6) = getVal(T,'pelvis_tilt',fi) + 90;      % Xrotation
-
-    frame(4) = 90;  % Zrotation
-    frame(5) = 0;      % Yrotation
-    frame(6) = 90;      % Xrotation
+    frame(4) = getVal(T,'pelvis_rotation',fi);  % Zrotation
+    frame(5) = getVal(T,'pelvis_list',fi);      % Yrotation
+    frame(6) = getVal(T,'pelvis_tilt',fi) + 90;      % Xrotation
 
     % Now fill other joints in same pre-order as jointOrder (indices start at 7)
     % compute base index for joint j: base = 6 + 3*(j-2) + 1  (1-based)
@@ -262,18 +248,16 @@ for fi = 1:numFrames
 
         switch nm
             case 'LeftUpLeg'
-                % hip_rotation_l -> Z, hip_adduction_l -> Y, hip_flexion_l -> X
-                x = getVal(T,'hip_rotation_l',fi) + 180;
-                y = getVal(T,'hip_adduction_l',fi);
-                z = getVal(T,'hip_flexion_l',fi) + 180;
                 
-                % x = getVal(T,'hip_adduction_l',fi) + 180;
-                % y = getVal(T,'hip_rotation_l',fi);
-                % z = getVal(T,'hip_flexion_l',fi) + 180;
-
-                % z = 180;
-                % y = 0;
-                % x = 180;
+                % x = (getVal(T,'hip_adduction_l',fi) + 180); % don't change
+                % y = -(getVal(T,'hip_rotation_l',fi)); % don't change
+                % z = -(getVal(T,'hip_flexion_l',fi) + 180);
+                
+                % best so far
+                x = (getVal(T,'hip_rotation_l',fi) + 180); % don't change
+                y = (getVal(T,'hip_adduction_l',fi)); % don't change
+                z = -(getVal(T,'hip_flexion_l',fi) + 180);
+                
             case 'LeftLeg'
                 % knee -> Xrotation
                 z = getVal(T,'knee_angle_l',fi);
@@ -290,17 +274,15 @@ for fi = 1:numFrames
                 y = 0;
                 z = getVal(T,'mtp_angle_l',fi);
             case 'RightUpLeg'
-                x = getVal(T,'hip_rotation_r',fi) - 180;
-                y = getVal(T,'hip_adduction_r',fi);
-                z = getVal(T,'hip_flexion_r',fi) + 180;
-                
-                % x = getVal(T,'hip_adduction_r',fi) + 180;
-                % y = getVal(T,'hip_rotation_r',fi);
-                % z = getVal(T,'hip_flexion_r',fi) + 180;
+                % x = (getVal(T,'hip_adduction_r',fi) + 180); % don't change
+                % y = (getVal(T,'hip_rotation_r',fi)); % don't change
+                % z = -(getVal(T,'hip_flexion_r',fi) + 180);
 
-                % z = -180;
-                % y = 0;
-                % x = -180;
+                % best so far
+                x = -(getVal(T,'hip_rotation_r',fi) + 180); % don't change
+                y = -(getVal(T,'hip_adduction_r',fi)); % don't change
+                z = -(getVal(T,'hip_flexion_r',fi) + 180);
+                
             case 'RightLeg'
                 z = getVal(T,'knee_angle_r',fi);
                 y = 0; 
@@ -313,11 +295,11 @@ for fi = 1:numFrames
                 x = 0; 
                 y = 0; 
                 z = getVal(T,'mtp_angle_r',fi);
-            % case 'Spine'
-            %     % lumbar_rotation -> Z, lumbar_bending -> Y, lumbar_extension -> X
-            %     z = getVal(T,'lumbar_rotation',fi);
-            %     y = getVal(T,'lumbar_bending',fi);
-            %     x = getVal(T,'lumbar_extension',fi);
+            case 'Spine'
+                % lumbar_rotation -> Z, lumbar_bending -> Y, lumbar_extension -> X
+                z = getVal(T,'lumbar_rotation',fi);
+                y = getVal(T,'lumbar_bending',fi);
+                x = getVal(T,'lumbar_extension',fi);
             
         end
     
@@ -325,22 +307,68 @@ for fi = 1:numFrames
         frame(base + 1) = y;
         frame(base + 2) = x;
     end
+   
+
+    % slow_factor = 6;
+    % 
+    % if mod(fi-1,slow_factor) == 0
+    %     rowIdx = mod(fi-1, 45) + 1;
+    % end
+    % 
+    % for col = 34:69
+    %     varName = sprintf('Var%d', col);
+    %     if ismember(varName, walk1_subject1.Properties.VariableNames)
+    %         beginning = walk1_subject1{rowIdx, varName};
+    %         final = walk1_subject1{rowIdx+1, varName};
+    %         frame(col) = beginning + mod(fi-1,slow_factor)*(final-beginning)/slow_factor;
+    %     end
+    % end
     
-    % for col = 31:69
+    % ---------- smooth interpolation for cols 34:69 (robust) ----------
+slow_factor = 5;
+Nrows = 45;   % number of rows in walk1_subject1
+
+% continuous row position and blend factor
+f      = (fi - 1) / slow_factor;    % fractional source-row index (0-based)
+rowIdx = floor(f) + 1;              % base keyframe (1-based)
+t      = f - floor(f);              % blend factor in [0,1)
+
+% wrap indices to 1..Nrows
+rowIdx = mod(rowIdx - 1, Nrows) + 1;
+nextIdx = mod(rowIdx, Nrows) + 1;
+
+% helper: read numeric value from table cell/char/number
+
+
+% shortest-path delta in degrees: result in [-180, +180)
+wrapTo180 = @(d) mod(d + 180, 360) - 180;
+
+for col = 34:69
+    varName = sprintf('Var%d', col);
+    if ~ismember(varName, walk1_subject1.Properties.VariableNames)
+        continue;
+    end
+
+    % read A and B robustly
+    A = readNumericFromTable(walk1_subject1, rowIdx, varName);
+    B = readNumericFromTable(walk1_subject1, nextIdx, varName);
+
+    % angular shortest-path interpolation (handles wrap-around)
+    delta = wrapTo180(B - A);          % signed shortest delta in degrees
+    frame(col) = A + t * delta;
+end
+% -------------------------------------------------------------------
+
+
+
+
+    % for col = 34:69
     %     rowIdx = mod(fi-1, 45) + 1;
     %     varName = sprintf('Var%d', col);
     %     if ismember(varName, walk1_subject1.Properties.VariableNames)
     %         frame(col) = walk1_subject1{rowIdx, varName};
     %     end
     % end
-
-    for col = 31:69
-        rowIdx = 1;
-        varName = sprintf('Var%d', col);
-        if ismember(varName, walk1_subject1.Properties.VariableNames)
-            frame(col) = walk1_subject1{rowIdx, varName};
-        end
-    end
 
     % write frame line as space-separated floats
     fprintf(fid, repmat('%f ', 1, numel(frame)), frame);
@@ -349,3 +377,24 @@ end
 
 fclose(fid);
 disp(['BVH saved to: ' outputBVH]);
+
+function v = readNumericFromTable(tbl, r, varName)
+    v_raw = tbl{r, varName};
+    if isnumeric(v_raw)
+        v = double(v_raw);
+    elseif iscell(v_raw)
+        inner = v_raw{1};
+        if isnumeric(inner)
+            v = double(inner);
+        else
+            v = str2double(inner);
+        end
+    elseif ischar(v_raw) || isstring(v_raw)
+        v = str2double(v_raw);
+    else
+        v = NaN;
+    end
+    if isnan(v)
+        v = 0;
+    end
+end

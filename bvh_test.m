@@ -58,8 +58,19 @@ jointOrder = { ...
       'RightShoulder','RightArm','RightForeArm','RightHand' ...
     };
 
+%% --- Helper: get value or 0 if missing ---
+hasCol = @(name) ismember(name, T.Properties.VariableNames);
+getVal = @(tbl, name, idx) ( hasCol(name) * tbl{idx, name} + (~hasCol(name)) * 0 );
+
+
+x_offset = getVal(T,'pelvis_tx',1)*100;
+y_offset = getVal(T,'pelvis_ty',1)*100;
+z_offset = getVal(T,'pelvis_tz',1)*100;
+
+offsets.Hips         = [x_offset, y_offset, z_offset];
+
 %% --- Offsets taken from your example HIERARCHY (keep as given) ---
-offsets.Hips         = [586.84 97.3 -848.3];
+% offsets.Hips         = [586.84 97.3 -848.3];
 % offsets.Hips         = [-224.689499 91.882057 -431.625488];
 %offsets.Hips         = [0 0 0];
 
@@ -227,18 +238,18 @@ getVal = @(tbl, name, idx) ( hasCol(name) * tbl{idx, name} + (~hasCol(name)) * 0
 for fi = 1:numFrames
     frame = zeros(1, numel(channelNames));
     % Hips positions
-    frame(1) = getVal(T,'pelvis_tx',fi)*1000;
-    frame(2) = getVal(T,'pelvis_ty',fi)*1000 - 880;
-    frame(3) = getVal(T,'pelvis_tz',fi)*1000;
+    frame(1) = getVal(T,'pelvis_tx',fi)*100;
+    frame(2) = getVal(T,'pelvis_ty',fi)*100;
+    frame(3) = getVal(T,'pelvis_tz',fi)*100;
     
     % frame(1) = -224.255070;
     % frame(2) = 91.280290;
     % frame(3) = -431.497850;
     % 
     % Hips rotations: Z Y X order (use pelvis_rotation -> Z, pelvis_list -> Y, pelvis_tilt -> X)
-    frame(4) = 91.911438;  % Zrotation
-    frame(5) = 5.797277;      % Yrotation
-    frame(6) = 88.877003;      % Xrotation
+    frame(4) = 90;%91.911438;  % Zrotation
+    frame(5) = 0;%5.797277;      % Yrotation
+    frame(6) = 90;% + sin(fi/10)*100;%88.877003;      % Xrotation
 
     % Now fill other joints in same pre-order as jointOrder (indices start at 7)
     % compute base index for joint j: base = 6 + 3*(j-2) + 1  (1-based)
@@ -251,7 +262,7 @@ for fi = 1:numFrames
         switch nm
             case 'LeftUpLeg'
                 % hip_rotation_l -> Z, hip_adduction_l -> Y, hip_flexion_l -> X
-                z = 180;
+                z = 180;%sin(fi/10)*100;
                 y = 0;
                 x = 180;
             case 'LeftLeg'
@@ -272,7 +283,7 @@ for fi = 1:numFrames
             case 'RightUpLeg'
                 z = -180;
                 y = 0;
-                x = -180;
+                x = 180;
             case 'RightLeg'
                 z = 0;
                 y = 0;
@@ -300,13 +311,19 @@ for fi = 1:numFrames
      
     end
     
+    
+
     for col = 31:69
         rowIdx = mod(fi-1, 45) + 1;
         varName = sprintf('Var%d', col);
         if ismember(varName, walk1_subject1.Properties.VariableNames)
             frame(col) = walk1_subject1{rowIdx, varName};
+        % elseif mod(col,3) == 0
+        %    frame(col) = walk1_subject1{rowIdx, varName} + sin(fi/10)*100;
         end
     end
+    
+    frame(33) = sin(fi/10)*100;
 
     % write frame line as space-separated floats
     fprintf(fid, repmat('%f ', 1, numel(frame)), frame);
